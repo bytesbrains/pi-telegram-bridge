@@ -1,0 +1,56 @@
+{
+  "name": "@bytesbrains/pi-telegram-bridge",
+  "version": "1.1.4",
+  "description": "Telegram bot bridge for pi agents — send messages, ask questions, and listen for human replies via Telegram.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "telegram",
+    "bot",
+    "bridge",
+    "messaging"
+  ],
+  "author": "nandal <nandal@users.noreply.github.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nandal/pi-ext.git",
+    "directory": "telegram-bridge"
+  },
+  "homepage": "https://github.com/nandal/pi-ext/tree/main/telegram-bridge",
+  "bugs": {
+    "url": "https://github.com/nandal/pi-ext/issues"
+  },
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "src/",
+    "skills/",
+    "README.md",
+    "AGENTS.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "typescript": "^6.0.3",
+    "vitest": "^2.1.9"
+  }
+}

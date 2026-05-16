@@ -1,0 +1,58 @@
+{
+  "files": {
+    "src/tools/telegram.ts": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 221
+        }
+      ],
+      "importsChanged": true,
+      "lastEdit": "2026-05-15T22:53:34.409Z"
+    },
+    "src/index.ts": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 452
+        }
+      ],
+      "importsChanged": true,
+      "lastEdit": "2026-05-16T00:07:45.770Z"
+    },
+    "src/templates.ts": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 790
+        }
+      ],
+      "importsChanged": false,
+      "lastEdit": "2026-05-15T23:58:38.500Z"
+    },
+    "src/__tests__/index.test.ts": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 580
+        }
+      ],
+      "importsChanged": true,
+      "lastEdit": "2026-05-15T22:53:34.511Z"
+    },
+    "src/helpers.ts": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 247
+        }
+      ],
+      "importsChanged": false,
+      "lastEdit": "2026-05-15T23:48:27.475Z"
+    }
+  },
+  "turnCycles": 0,
+  "maxCycles": 3,
+  "lastUpdated": "2026-05-16T00:07:45.770Z",
+  "sessionId": "lens-mp7kyifl-c1269f2a"
+}
