@@ -199,6 +199,11 @@ export const notifySchema = Type.Object({
 	ackEmoji: Type.Optional(Type.String()),
 });
 
+export const sendPhotoSchema = Type.Object({
+	photoPath: Type.String({ description: "Local file path or remote URL of the photo to send" }),
+	caption: Type.Optional(Type.String({ description: "Optional caption text (HTML formatting supported)" })),
+});
+
 export const listenSchema = Type.Object({});
 
 export const sendSchema = Type.Object({ message: Type.String() });

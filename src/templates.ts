@@ -10,23 +10,28 @@
 
 const BAR = "━".repeat(20);
 
+/** Escape user text for safe embedding inside HTML tags. */
+function escapeHtml(s: string): string {
+	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function bold(s: string) {
-	return `<b>${s}</b>`;
+	return `<b>${escapeHtml(s)}</b>`;
 }
 function italic(s: string) {
-	return `<i>${s}</i>`;
+	return `<i>${escapeHtml(s)}</i>`;
 }
 function code(s: string) {
-	return `<code>${s}</code>`;
+	return `<code>${escapeHtml(s)}</code>`;
 }
 function strike(s: string) {
-	return `<s>${s}</s>`;
+	return `<s>${escapeHtml(s)}</s>`;
 }
 function labelValue(label: string, value: string) {
 	return `${bold(label + ":")} ${value}`;
 }
 function link(url: string, text: string) {
-	return `<a href="${url}">${text}</a>`;
+	return `<a href="${url}">${escapeHtml(text)}</a>`;
 }
 function progressBar(pct: number, width = 12) {
 	const filled = Math.round((pct / 100) * width);
@@ -249,7 +254,7 @@ export function ciPipeline(p: CIPipeline): string {
 	msg += `${BAR}\n`;
 	msg += labelValue("Run", `#${p.runNumber}`) + "\n";
 	msg += labelValue("Branch", code(p.branch)) + "\n";
-	msg += labelValue("Trigger", p.event) + "\n";
+	msg += labelValue("Trigger", escapeHtml(p.event)) + "\n";
 	if (p.triggeredBy) msg += labelValue("By", code(p.triggeredBy)) + "\n";
 	msg += `${BAR}\n`;
 

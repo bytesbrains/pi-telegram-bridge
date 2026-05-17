@@ -437,10 +437,10 @@ describe("pollUpdates", () => {
     // pollUpdates has 5s delay between polls — this test takes ~5s
     await helpers.pollUpdates(
       TEST_TOKEN, TEST_CHAT_ID, 12345, 0,
-      controller.signal, onMessage, onUpdateId,
+      controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
-    expect(onMessage).toHaveBeenCalledWith("Hello agent!");
+    expect(onMessage).toHaveBeenCalledWith('Hello agent!', '987654321');
     expect(onUpdateId).toHaveBeenCalledWith(100);
   }, 15000);
 
@@ -482,7 +482,7 @@ describe("pollUpdates", () => {
 
     await helpers.pollUpdates(
       TEST_TOKEN, TEST_CHAT_ID, 12345, 0,
-      controller.signal, onMessage, onUpdateId,
+      controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
     expect(onMessage).not.toHaveBeenCalled();
@@ -527,7 +527,7 @@ describe("pollUpdates", () => {
 
     await helpers.pollUpdates(
       TEST_TOKEN, TEST_CHAT_ID, 12345, 0,
-      controller.signal, onMessage, onUpdateId,
+      controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
     expect(onMessage).not.toHaveBeenCalled();
@@ -567,7 +567,7 @@ describe("pollUpdates", () => {
 
     await helpers.pollUpdates(
       TEST_TOKEN, TEST_CHAT_ID, 12345, 0,
-      controller.signal, onMessage, onUpdateId,
+      controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
     expect(onMessage).not.toHaveBeenCalled();
@@ -615,10 +615,10 @@ describe("pollUpdates", () => {
 
     await helpers.pollUpdates(
       TEST_TOKEN, TEST_CHAT_ID, 12345, 0,
-      controller.signal, onMessage, onUpdateId,
+      controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
-    expect(onMessage).toHaveBeenCalledWith("recovered");
+    expect(onMessage).toHaveBeenCalledWith('recovered', '987654321');
   }, 20000);
 
   it("handles network errors with retry", async () => {
@@ -660,10 +660,10 @@ describe("pollUpdates", () => {
 
     await helpers.pollUpdates(
       TEST_TOKEN, TEST_CHAT_ID, 12345, 0,
-      controller.signal, onMessage, onUpdateId,
+      controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
-    expect(onMessage).toHaveBeenCalledWith("eventually");
+    expect(onMessage).toHaveBeenCalledWith('eventually', '987654321');
   }, 25000);
 
   it("stops gracefully when aborted immediately", async () => {
@@ -681,7 +681,7 @@ describe("pollUpdates", () => {
 
     await helpers.pollUpdates(
       TEST_TOKEN, TEST_CHAT_ID, 12345, 0,
-      controller.signal, onMessage, onUpdateId,
+      controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
     expect(onMessage).not.toHaveBeenCalled();
@@ -731,10 +731,10 @@ describe("pollUpdates", () => {
 
     await helpers.pollUpdates(
       TEST_TOKEN, TEST_CHAT_ID, 12345, 0,
-      controller.signal, onMessage, onUpdateId,
+      controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
-    expect(onMessage).toHaveBeenCalledWith("after not-ok");
+    expect(onMessage).toHaveBeenCalledWith('after not-ok', '987654321');
   }, 20000);
 
   it("ignores messages without text field", async () => {
@@ -775,7 +775,7 @@ describe("pollUpdates", () => {
 
     await helpers.pollUpdates(
       TEST_TOKEN, TEST_CHAT_ID, 12345, 0,
-      controller.signal, onMessage, onUpdateId,
+      controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
     expect(onMessage).not.toHaveBeenCalled();

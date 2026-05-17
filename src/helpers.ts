@@ -48,11 +48,140 @@ export async function sendMsg(
 		parse_mode: parseMode,
 	};
 	if (replyMarkup) body.reply_markup = JSON.stringify(replyMarkup);
-	const r = (await telegramApi("sendMessage", body)) as {
+	try {
+		const r = (await telegramApi("sendMessage", body)) as {
+			ok: boolean;
+			result: { message_id: number };
+		};
+		return r.result.message_id;
+	} catch (e: unknown) {
+		// Retry without parse_mode if formatting caused a 400 parse error
+		const msg = e instanceof Error ? e.message : String(e);
+		if (
+			parseMode &&
+			msg.includes("400") &&
+			(msg.includes("parse") || msg.includes("entity"))
+		) {
+			delete body.parse_mode;
+			const r2 = (await telegramApi("sendMessage", body)) as {
+				ok: boolean;
+				result: { message_id: number };
+			};
+			return r2.result.message_id;
+		}
+		throw e;
+	}
+}
+
+// ── Photo / File Support ────────────────────────────────────────────
+
+/**
+ * Get a Telegram file URL for downloading.
+ * Returns { file_path } from the getFile API.
+ */
+export async function getFileUrl(fileId: string): Promise<string | null> {
+	const token = getToken();
+	try {
+		const res = await fetch(`${BASE_URL}${token}/getFile`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ file_id: fileId }),
+		});
+		if (!res.ok) return null;
+		const data = (await res.json()) as {
+			ok: boolean;
+			result: { file_path: string };
+		};
+		if (!data.ok || !data.result?.file_path) return null;
+		return `https://api.telegram.org/file/bot${token}/${data.result.file_path}`;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Download a Telegram file to a local path.
+ * Returns the file path on success, null on failure.
+ * Creates parent directories automatically.
+ */
+export async function downloadFile(
+	fileId: string,
+	destPath: string,
+): Promise<string | null> {
+	try {
+		const fileUrl = await getFileUrl(fileId);
+		if (!fileUrl) return null;
+		const res = await fetch(fileUrl);
+		if (!res.ok) return null;
+		const buffer = Buffer.from(await res.arrayBuffer());
+		const path = await import("node:path");
+		const fsPromises = await import("node:fs/promises");
+		const dir = path.dirname(destPath);
+		await fsPromises.mkdir(dir, { recursive: true });
+		await fsPromises.writeFile(destPath, buffer);
+		return destPath;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Send a photo to the Telegram chat.
+ * Supports sending from a local file path or a remote URL.
+ */
+export async function sendPhoto(
+	photoPath: string,
+	caption?: string,
+): Promise<number> {
+	const fs = await import("node:fs/promises");
+	let fileData: Buffer;
+	let filename: string;
+
+	// Check if it's a URL
+	if (photoPath.startsWith("http://") || photoPath.startsWith("https://")) {
+		filename = "photo.jpg";
+		const res = await fetch(photoPath);
+		if (!res.ok) throw new Error(`Failed to fetch photo: ${res.status}`);
+		fileData = Buffer.from(await res.arrayBuffer());
+	} else {
+		filename = photoPath;
+		fileData = await fs.readFile(photoPath);
+	}
+
+	const token = getToken();
+	const formData = new FormData();
+	formData.set("chat_id", getChatId());
+	const blob = new Blob([fileData]);
+	formData.set("photo", blob, filename);
+	if (caption) {
+		formData.set("caption", caption);
+		formData.set("parse_mode", "HTML");
+	}
+
+	const url = `${BASE_URL}${token}/sendPhoto`;
+	const res = await fetch(url, {
+		method: "POST",
+		body: formData,
+	});
+
+	if (!res.ok) {
+		const errText = await res.text();
+		// Retry without caption if parse_mode caused a 400
+		if (
+			caption &&
+			res.status === 400 &&
+			(errText.includes("parse") || errText.includes("entity"))
+		) {
+			return sendPhoto(photoPath);
+		}
+		throw new Error(`sendPhoto failed: ${res.status} ${errText}`);
+	}
+
+	const data = (await res.json()) as {
 		ok: boolean;
 		result: { message_id: number };
 	};
-	return r.result.message_id;
+	return data.result.message_id;
 }
 
 // ── Polling ─────────────────────────────────────────────────────────
@@ -188,7 +317,8 @@ export async function pollUpdates(
 	botId: number | null,
 	lastUpdateId: number,
 	signal: AbortSignal,
-	onMessage: (text: string) => void,
+	onMessage: (text: string, msgChatId: string) => void,
+	onPhoto: (photoId: string, caption?: string) => void,
 	onUpdateId: (id: number) => void,
 ): Promise<void> {
 	while (!signal.aborted) {
@@ -212,6 +342,13 @@ export async function pollUpdates(
 						chat: { id: number };
 						from?: { id: number; is_bot?: boolean };
 						text?: string;
+						photo?: Array<{
+							file_id: string;
+							file_unique_id: string;
+							width: number;
+							height: number;
+						}>;
+						caption?: string;
 					};
 					callback_query?: unknown;
 				}>;
@@ -225,16 +362,21 @@ export async function pollUpdates(
 				onUpdateId(lastUpdateId);
 				// Skip callback queries (handled by telegram_ask)
 				if (u.callback_query) continue;
-				// Only process text messages from the configured chat, not from our bot
-				if (
-					u.message &&
-					u.message.text &&
-					String(u.message.chat.id) === chatId
-				) {
+				// Process messages from the configured chat, not from our bot
+				if (u.message && String(u.message.chat.id) === chatId) {
 					if (u.message.from?.is_bot || u.message.from?.id === botId) {
 						continue;
 					}
-					onMessage(u.message.text);
+					// Photo message
+					if (u.message.photo && u.message.photo.length > 0) {
+						const largest = u.message.photo[u.message.photo.length - 1];
+						onPhoto(largest.file_id, u.message.caption);
+						continue;
+					}
+					// Text message
+					if (u.message.text) {
+						onMessage(u.message.text, String(u.message.chat.id));
+					}
 				}
 			}
 		} catch (e: unknown) {

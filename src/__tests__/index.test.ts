@@ -104,17 +104,18 @@ afterEach(() => {
 // ── Tool Registration ─────────────────────────────────────────────
 
 describe("extension registration", () => {
-	it("registers all 6 tools", () => {
+	it("registers all 7 tools", () => {
 		const pi = createMockPI();
 		telegramBridge(pi as any);
 
-		expect(pi.registerTool).toHaveBeenCalledTimes(6);
+		expect(pi.registerTool).toHaveBeenCalledTimes(7);
 		expect(pi._getTool("telegram_listen")).toBeDefined();
 		expect(pi._getTool("telegram_send")).toBeDefined();
 		expect(pi._getTool("telegram_ask")).toBeDefined();
 		expect(pi._getTool("telegram_override")).toBeDefined();
 		expect(pi._getTool("telegram_status")).toBeDefined();
 		expect(pi._getTool("telegram_notify")).toBeDefined();
+		expect(pi._getTool("telegram_send_photo")).toBeDefined();
 	});
 
 	it("registers session_start and session_shutdown handlers", () => {
@@ -575,5 +576,81 @@ describe("session lifecycle", () => {
 		await pi._listeners["session_start"][0]({}, ctx);
 		await new Promise((r) => setTimeout(r, 100));
 		expect(mockPollUpdates).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not crash when TELEGRAM_BOT_TOKEN is not set (graceful degradation)", async () => {
+		vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
+		vi.stubEnv("TELEGRAM_CHAT_ID", "");
+		const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		const pi = createMockPI();
+		telegramBridge(pi as any);
+
+		const ctx = {
+			sessionManager: { getEntries: () => [] },
+		};
+
+		// Should NOT throw
+		await expect(
+			pi._listeners["session_start"][0]({}, ctx),
+		).resolves.toBeUndefined();
+
+		// Should have warned about missing config
+		expect(consoleWarn).toHaveBeenCalledWith(
+			expect.stringContaining("TELEGRAM_BOT_TOKEN"),
+		);
+
+		// Listener should NOT have been started
+		expect(mockPollUpdates).not.toHaveBeenCalled();
+
+		consoleWarn.mockRestore();
+	});
+
+	it("does not crash when only TELEGRAM_BOT_TOKEN is missing", async () => {
+		vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
+		// CHAT_ID is set
+		const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		const pi = createMockPI();
+		telegramBridge(pi as any);
+
+		const ctx = {
+			sessionManager: { getEntries: () => [] },
+		};
+
+		await expect(
+			pi._listeners["session_start"][0]({}, ctx),
+		).resolves.toBeUndefined();
+
+		expect(consoleWarn).toHaveBeenCalledWith(
+			expect.stringContaining("TELEGRAM_BOT_TOKEN"),
+		);
+		expect(mockPollUpdates).not.toHaveBeenCalled();
+
+		consoleWarn.mockRestore();
+	});
+
+	it("does not crash when only TELEGRAM_CHAT_ID is missing", async () => {
+		vi.stubEnv("TELEGRAM_CHAT_ID", "");
+		// BOT_TOKEN is set
+		const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		const pi = createMockPI();
+		telegramBridge(pi as any);
+
+		const ctx = {
+			sessionManager: { getEntries: () => [] },
+		};
+
+		await expect(
+			pi._listeners["session_start"][0]({}, ctx),
+		).resolves.toBeUndefined();
+
+		expect(consoleWarn).toHaveBeenCalledWith(
+			expect.stringContaining("TELEGRAM_BOT_TOKEN"),
+		);
+		expect(mockPollUpdates).not.toHaveBeenCalled();
+
+		consoleWarn.mockRestore();
 	});
 });

@@ -13,11 +13,16 @@ import {
 	getChatId,
 	telegramApi,
 	sendMsg,
+	sendPhoto,
+	getFileUrl,
+	downloadFile,
 	pollReply,
 	getBotId,
 	seedLastUpdateId,
 	pollUpdates,
 } from "./helpers";
+import * as path from "node:path";
+import * as os from "node:os";
 import {
 	listenSchema,
 	sendSchema,
@@ -25,24 +30,182 @@ import {
 	statusSchema,
 	overrideSchema,
 	notifySchema,
+	sendPhotoSchema,
 } from "./tools/telegram";
 
 export default function telegramBridge(pi: ExtensionAPI) {
 	let botId: number | null = null;
 	let listenerAbort: AbortController | null = null;
 	let lastUpdateId = 0;
+	let mentionTrigger = "@pi"; // configurable via TELEGRAM_MENTION env var
+	const sessionStartTime = Date.now();
+	let messageCount = 0;
+
+	// ── Mention support ────────────────────────────────────────────
+
+	async function resolveMentionTrigger(): Promise<string> {
+		// 1. Explicit env var overrides everything
+		const envMention = process.env.TELEGRAM_MENTION;
+		if (envMention)
+			return envMention.startsWith("@") ? envMention : "@" + envMention;
+		// 2. Try bot username from getMe
+		try {
+			const r = (await telegramApi("getMe", {})) as {
+				result: { username: string };
+			};
+			if (r.result?.username) return "@" + r.result.username;
+		} catch {
+			/* fall through */
+		}
+		return "@pi";
+	}
+
+	/** Strip mention from message text and return cleaned text + whether it was mentioned. */
+	function checkMention(
+		text: string,
+		isPrivateChat: boolean,
+	): { mentioned: boolean; cleanedText: string } {
+		if (isPrivateChat) return { mentioned: true, cleanedText: text };
+		const trigger = mentionTrigger.slice(1).toLowerCase(); // strip @
+		const patterns = [
+			new RegExp(`@${trigger}\\b`, "i"), // @pi at start or middle
+			new RegExp(`^${trigger}\\b`, "i"), // pi at start (no @)
+		];
+		for (const re of patterns) {
+			if (re.test(text)) {
+				const cleaned = text.replace(re, "").trim();
+				return { mentioned: true, cleanedText: cleaned || text };
+			}
+		}
+		return { mentioned: false, cleanedText: text };
+	}
+
+	// ── Dashboard helper ────────────────────────────────────────────
+
+	async function sendDashboard() {
+		const token = getToken();
+		const giteaToken = process.env.GITEA_TOKEN || process.env.GIT_TOKEN || "";
+		const apiBase = "http://127.0.0.1:3001/api/v1/repos/factory/pi-ext";
+		const headers: Record<string, string> = {
+			"Content-Type": "application/json",
+		};
+		if (giteaToken) headers["Authorization"] = `token ${giteaToken}`;
+
+		try {
+			const [issuesR, prsR, runsR] = await Promise.all([
+				fetch(`${apiBase}/issues?state=open&limit=10`, { headers })
+					.then((r) => r.json())
+					.catch(() => []),
+				fetch(`${apiBase}/pulls?state=open&limit=10`, { headers })
+					.then((r) => r.json())
+					.catch(() => []),
+				fetch(`${apiBase}/actions/runs?limit=3`, { headers })
+					.then((r) => r.json())
+					.catch(() => ({ workflow_runs: [] })),
+			]);
+
+			const issues = Array.isArray(issuesR) ? issuesR : [];
+			const prs = Array.isArray(prsR) ? prsR : [];
+			const runs = (runsR as any).workflow_runs ?? [];
+
+			const lines: string[] = [];
+			lines.push("📊 <b>pi-ext Status</b>");
+			lines.push("");
+
+			// Open issues
+			lines.push(`📋 <b>Open Issues:</b> ${issues.length}`);
+			if (issues.length > 0) {
+				for (const i of (issues as any[]).slice(0, 5)) {
+					const labels = i.labels?.length
+						? ` [${i.labels.map((l: any) => l.name).join(", ")}]`
+						: "";
+					lines.push(`   #${i.number} ${i.title.slice(0, 60)}${labels}`);
+				}
+			} else {
+				lines.push("   (none)");
+			}
+			lines.push("");
+
+			// Open PRs
+			lines.push(`🔀 <b>Open PRs:</b> ${prs.length}`);
+			if (prs.length > 0) {
+				for (const p of (prs as any[]).slice(0, 5)) {
+					const mergeIcon = p.mergeable ? "✅" : "❌";
+					lines.push(`   ${mergeIcon} #${p.number} ${p.title.slice(0, 55)}`);
+				}
+			} else {
+				lines.push("   (none)");
+			}
+			lines.push("");
+
+			// CI status
+			if (runs.length > 0) {
+				const latest = runs[0];
+				const statusIcon =
+					latest.status === "success"
+						? "✅"
+						: latest.status === "failure"
+							? "❌"
+							: latest.status === "running"
+								? "🔄"
+								: "⏳";
+				lines.push(
+					`🔧 <b>Last CI:</b> ${statusIcon} ${latest.status} (${runs.length} recent runs)`,
+				);
+			} else {
+				lines.push("🔧 <b>Last CI:</b> no runs");
+			}
+			lines.push("");
+
+			// Session metrics
+			const uptimeMin = Math.floor((Date.now() - sessionStartTime) / 60000);
+			const uptimeStr =
+				uptimeMin < 60
+					? `${uptimeMin}m`
+					: `${Math.floor(uptimeMin / 60)}h ${uptimeMin % 60}m`;
+			lines.push("🤖 <b>Session</b>");
+			lines.push(`   Uptime: ${uptimeStr}`);
+			lines.push(`   Messages: ${messageCount}`);
+			lines.push(`   Mention: ${mentionTrigger}`);
+
+			await sendMsg(lines.join("\n"), undefined, "HTML");
+		} catch {
+			await sendMsg(
+				"⚠️ Could not fetch project dashboard. Gitea may be unreachable.",
+			);
+		}
+	}
 
 	// ── Session lifecycle ───────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {
+		// Ensure photo download directory exists
+		const { mkdir } = await import("node:fs/promises");
+		const photoDir = path.join(os.tmpdir(), "telegram-photos");
+		await mkdir(photoDir, { recursive: true }).catch(() => {});
 		// Restore lastUpdateId from session state
 		for (const entry of ctx.sessionManager.getEntries()) {
 			if (entry.type === "custom" && entry.customType === "tg-last-update") {
 				lastUpdateId = (entry.data as { update_id: number }).update_id;
 			}
 		}
+		// Skip listener if Telegram is not configured
+		if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
+			console.warn(
+				"pi-telegram-bridge: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set. Listener disabled.",
+			);
+			return;
+		}
 		// Start background listener
-		startListener();
+		try {
+			mentionTrigger = await resolveMentionTrigger();
+			startListener();
+		} catch (e: unknown) {
+			console.warn(
+				"pi-telegram-bridge: Failed to start listener:",
+				e instanceof Error ? e.message : e,
+			);
+		}
 	});
 
 	pi.on("session_shutdown", () => {
@@ -67,6 +230,11 @@ export default function telegramBridge(pi: ExtensionAPI) {
 		// Seed lastUpdateId
 		lastUpdateId = await seedLastUpdateId(lastUpdateId, signal);
 
+		// Create photo download directory
+		const fsPromises = await import("node:fs/promises");
+		const photoDir = path.join(os.tmpdir(), "telegram-photos");
+		await fsPromises.mkdir(photoDir, { recursive: true }).catch(() => {});
+
 		// Fire and forget — poll in background
 		pollUpdates(
 			token,
@@ -74,14 +242,45 @@ export default function telegramBridge(pi: ExtensionAPI) {
 			botId,
 			lastUpdateId,
 			signal,
-			// onMessage: forward to pi as user message
-			async (text: string) => {
-				pi.sendUserMessage(text);
+			// onMessage: forward to pi (with mention check in groups), or dashboard on "hi"
+			async (text: string, msgChatId: string) => {
+				const isPrivate = msgChatId === chatId;
+				const { mentioned, cleanedText } = checkMention(text, isPrivate);
+				if (!mentioned) return; // ignore unmentioned messages in groups
+
+				const trimmed = cleanedText.trim().toLowerCase();
+				if (trimmed === "hi" || trimmed === "/status" || trimmed === "status") {
+					await sendDashboard();
+					return;
+				}
+				messageCount++;
+				pi.sendUserMessage(cleanedText);
 				await sendMsg(
-					`👂 Got it! Working on: _${text.slice(0, 100)}_`,
+					`👂 Got it! Working on: _${cleanedText.slice(0, 100)}_`,
 					undefined,
 					"Markdown",
 				);
+			},
+			// onPhoto: download and forward photo + caption to pi
+			async (photoId: string, caption?: string) => {
+				const timestamp = Date.now();
+				const filename = `photo_${timestamp}.jpg`;
+				const destPath = path.join(photoDir, filename);
+				const result = await downloadFile(photoId, destPath);
+				if (result) {
+					const captionText = caption ? `\n\n📝 Caption: ${caption}` : "";
+					pi.sendUserMessage(
+						`📸 Photo received from Telegram\nPath: ${result}${captionText}\n\nUse read("${result}") to view the image.`,
+					);
+					await sendMsg("📸 Photo received! Processing...");
+				} else {
+					pi.sendUserMessage(
+						"📸 Photo received from Telegram but could not be downloaded.",
+					);
+					await sendMsg(
+						"⚠️ Could not download your photo. Please check the bot configuration.",
+					);
+				}
 			},
 			// onUpdateId: persist offset
 			(id: number) => {
@@ -145,22 +344,67 @@ export default function telegramBridge(pi: ExtensionAPI) {
 					lastUpdateId = u.update_id;
 					pi.appendEntry("tg-last-update", { update_id: lastUpdateId });
 					if (u.callback_query) continue;
-					if (
-						u.message &&
-						u.message.text &&
-						String(u.message.chat.id) === chatId
-					) {
+					if (u.message && String(u.message.chat.id) === chatId) {
 						if (u.message.from?.is_bot || u.message.from?.id === botId)
 							continue;
-						return {
-							content: [
-								{
-									type: "text",
-									text: `📩 New message: "${u.message.text}"`,
+						// Photo message
+						if (u.message.photo && u.message.photo.length > 0) {
+							const photoId =
+								u.message.photo[u.message.photo.length - 1].file_id;
+							const caption = u.message.caption || "";
+							const timestamp = Date.now();
+							const fsPromises = await import("node:fs/promises");
+							const photoDirLocal = path.join(os.tmpdir(), "telegram-photos");
+							await fsPromises
+								.mkdir(photoDirLocal, { recursive: true })
+								.catch(() => {});
+							const destFile = path.join(
+								photoDirLocal,
+								`photo_${timestamp}.jpg`,
+							);
+							const result = await downloadFile(photoId, destFile);
+							const captionInfo = caption ? `\nCaption: "${caption}"` : "";
+							if (result) {
+								return {
+									content: [
+										{
+											type: "text",
+											text: `📸 Photo received from Telegram\nPath: ${result}${captionInfo}\n\nUse read("${result}") to view the image.`,
+										},
+									],
+									details: {
+										message: caption,
+										photoPath: result,
+										hasPhoto: true,
+									},
+								};
+							}
+							return {
+								content: [
+									{
+										type: "text",
+										text: `📸 Photo received from Telegram but could not be downloaded.${captionInfo}`,
+									},
+								],
+								details: {
+									message: caption,
+									hasPhoto: true,
+									downloadFailed: true,
 								},
-							],
-							details: { message: u.message.text },
-						};
+							};
+						}
+						// Text message
+						if (u.message.text) {
+							return {
+								content: [
+									{
+										type: "text",
+										text: `📩 New message: "${u.message.text}"`,
+									},
+								],
+								details: { message: u.message.text },
+							};
+						}
 					}
 				}
 				return {
@@ -336,7 +580,11 @@ export default function telegramBridge(pi: ExtensionAPI) {
 					action = "explain";
 				}
 
-				await sendMsg(`✅ Choice received: <i>${choice}</i>`, undefined, "HTML");
+				await sendMsg(
+					`✅ Choice received: <i>${choice}</i>`,
+					undefined,
+					"HTML",
+				);
 
 				return {
 					content: [
@@ -400,6 +648,38 @@ export default function telegramBridge(pi: ExtensionAPI) {
 						{
 							type: "text",
 							text: `Failed: ${e instanceof Error ? e.message : e}`,
+						},
+					],
+					details: {},
+					isError: true,
+				};
+			}
+		},
+	});
+
+	// telegram_send_photo
+	pi.registerTool({
+		name: "telegram_send_photo",
+		label: "Send Photo",
+		description:
+			"Send a photo to the Telegram chat. Supports local file paths and remote URLs.",
+		parameters: sendPhotoSchema,
+		async execute(
+			_id: string,
+			params: { photoPath: string; caption?: string },
+		) {
+			try {
+				const mid = await sendPhoto(params.photoPath, params.caption);
+				return {
+					content: [{ type: "text", text: `Photo sent (id:${mid})` }],
+					details: { messageId: mid },
+				};
+			} catch (e: unknown) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Failed to send photo: ${e instanceof Error ? e.message : e}`,
 						},
 					],
 					details: {},
