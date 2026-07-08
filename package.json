@@ -10,15 +10,14 @@
     "bridge",
     "messaging"
   ],
-  "author": "nandal <nandal@users.noreply.github.com>",
+  "author": "BytesBrains Pte Ltd (https://bytesbrains.com)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nandal/pi-ext.git",
-    "directory": "telegram-bridge"
+    "url": "git+https://github.com/bytesbrains/pi-telegram-bridge.git"
   },
-  "homepage": "https://github.com/nandal/pi-ext/tree/main/telegram-bridge",
+  "homepage": "https://github.com/bytesbrains/pi-telegram-bridge#readme",
   "bugs": {
-    "url": "https://github.com/nandal/pi-ext/issues"
+    "url": "https://github.com/bytesbrains/pi-telegram-bridge/issues"
   },
   "license": "MIT",
   "main": "./src/index.ts",
