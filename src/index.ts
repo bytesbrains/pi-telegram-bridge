@@ -32,149 +32,12 @@ import {
 	notifySchema,
 	sendPhotoSchema,
 } from "./tools/telegram";
+import { handleCommand, isPossibleCommand } from "./commands";
 
 export default function telegramBridge(pi: ExtensionAPI) {
 	let botId: number | null = null;
 	let listenerAbort: AbortController | null = null;
 	let lastUpdateId = 0;
-	let mentionTrigger = "@pi"; // configurable via TELEGRAM_MENTION env var
-	const sessionStartTime = Date.now();
-	let messageCount = 0;
-
-	// ── Mention support ────────────────────────────────────────────
-
-	async function resolveMentionTrigger(): Promise<string> {
-		// 1. Explicit env var overrides everything
-		const envMention = process.env.TELEGRAM_MENTION;
-		if (envMention)
-			return envMention.startsWith("@") ? envMention : "@" + envMention;
-		// 2. Try bot username from getMe
-		try {
-			const r = (await telegramApi("getMe", {})) as {
-				result: { username: string };
-			};
-			if (r.result?.username) return "@" + r.result.username;
-		} catch {
-			/* fall through */
-		}
-		return "@pi";
-	}
-
-	/** Strip mention from message text and return cleaned text + whether it was mentioned. */
-	function checkMention(
-		text: string,
-		isPrivateChat: boolean,
-	): { mentioned: boolean; cleanedText: string } {
-		if (isPrivateChat) return { mentioned: true, cleanedText: text };
-		const trigger = mentionTrigger.slice(1).toLowerCase(); // strip @
-		const patterns = [
-			new RegExp(`@${trigger}\\b`, "i"), // @pi at start or middle
-			new RegExp(`^${trigger}\\b`, "i"), // pi at start (no @)
-		];
-		for (const re of patterns) {
-			if (re.test(text)) {
-				const cleaned = text.replace(re, "").trim();
-				return { mentioned: true, cleanedText: cleaned || text };
-			}
-		}
-		return { mentioned: false, cleanedText: text };
-	}
-
-	// ── Dashboard helper ────────────────────────────────────────────
-
-	async function sendDashboard() {
-		const token = getToken();
-		const giteaToken = process.env.GITEA_TOKEN || process.env.GIT_TOKEN || "";
-		const apiBase = "http://127.0.0.1:3001/api/v1/repos/factory/pi-ext";
-		const headers: Record<string, string> = {
-			"Content-Type": "application/json",
-		};
-		if (giteaToken) headers["Authorization"] = `token ${giteaToken}`;
-
-		try {
-			const [issuesR, prsR, runsR] = await Promise.all([
-				fetch(`${apiBase}/issues?state=open&limit=10`, { headers })
-					.then((r) => r.json())
-					.catch(() => []),
-				fetch(`${apiBase}/pulls?state=open&limit=10`, { headers })
-					.then((r) => r.json())
-					.catch(() => []),
-				fetch(`${apiBase}/actions/runs?limit=3`, { headers })
-					.then((r) => r.json())
-					.catch(() => ({ workflow_runs: [] })),
-			]);
-
-			const issues = Array.isArray(issuesR) ? issuesR : [];
-			const prs = Array.isArray(prsR) ? prsR : [];
-			const runs = (runsR as any).workflow_runs ?? [];
-
-			const lines: string[] = [];
-			lines.push("📊 <b>pi-ext Status</b>");
-			lines.push("");
-
-			// Open issues
-			lines.push(`📋 <b>Open Issues:</b> ${issues.length}`);
-			if (issues.length > 0) {
-				for (const i of (issues as any[]).slice(0, 5)) {
-					const labels = i.labels?.length
-						? ` [${i.labels.map((l: any) => l.name).join(", ")}]`
-						: "";
-					lines.push(`   #${i.number} ${i.title.slice(0, 60)}${labels}`);
-				}
-			} else {
-				lines.push("   (none)");
-			}
-			lines.push("");
-
-			// Open PRs
-			lines.push(`🔀 <b>Open PRs:</b> ${prs.length}`);
-			if (prs.length > 0) {
-				for (const p of (prs as any[]).slice(0, 5)) {
-					const mergeIcon = p.mergeable ? "✅" : "❌";
-					lines.push(`   ${mergeIcon} #${p.number} ${p.title.slice(0, 55)}`);
-				}
-			} else {
-				lines.push("   (none)");
-			}
-			lines.push("");
-
-			// CI status
-			if (runs.length > 0) {
-				const latest = runs[0];
-				const statusIcon =
-					latest.status === "success"
-						? "✅"
-						: latest.status === "failure"
-							? "❌"
-							: latest.status === "running"
-								? "🔄"
-								: "⏳";
-				lines.push(
-					`🔧 <b>Last CI:</b> ${statusIcon} ${latest.status} (${runs.length} recent runs)`,
-				);
-			} else {
-				lines.push("🔧 <b>Last CI:</b> no runs");
-			}
-			lines.push("");
-
-			// Session metrics
-			const uptimeMin = Math.floor((Date.now() - sessionStartTime) / 60000);
-			const uptimeStr =
-				uptimeMin < 60
-					? `${uptimeMin}m`
-					: `${Math.floor(uptimeMin / 60)}h ${uptimeMin % 60}m`;
-			lines.push("🤖 <b>Session</b>");
-			lines.push(`   Uptime: ${uptimeStr}`);
-			lines.push(`   Messages: ${messageCount}`);
-			lines.push(`   Mention: ${mentionTrigger}`);
-
-			await sendMsg(lines.join("\n"), undefined, "HTML");
-		} catch {
-			await sendMsg(
-				"⚠️ Could not fetch project dashboard. Gitea may be unreachable.",
-			);
-		}
-	}
 
 	// ── Session lifecycle ───────────────────────────────────────────
 
@@ -189,23 +52,8 @@ export default function telegramBridge(pi: ExtensionAPI) {
 				lastUpdateId = (entry.data as { update_id: number }).update_id;
 			}
 		}
-		// Skip listener if Telegram is not configured
-		if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
-			console.warn(
-				"pi-telegram-bridge: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set. Listener disabled.",
-			);
-			return;
-		}
 		// Start background listener
-		try {
-			mentionTrigger = await resolveMentionTrigger();
-			startListener();
-		} catch (e: unknown) {
-			console.warn(
-				"pi-telegram-bridge: Failed to start listener:",
-				e instanceof Error ? e.message : e,
-			);
-		}
+		startListener();
 	});
 
 	pi.on("session_shutdown", () => {
@@ -242,21 +90,16 @@ export default function telegramBridge(pi: ExtensionAPI) {
 			botId,
 			lastUpdateId,
 			signal,
-			// onMessage: forward to pi (with mention check in groups), or dashboard on "hi"
-			async (text: string, msgChatId: string) => {
-				const isPrivate = msgChatId === chatId;
-				const { mentioned, cleanedText } = checkMention(text, isPrivate);
-				if (!mentioned) return; // ignore unmentioned messages in groups
-
-				const trimmed = cleanedText.trim().toLowerCase();
-				if (trimmed === "hi" || trimmed === "/status" || trimmed === "status") {
-					await sendDashboard();
-					return;
+			// onMessage: check for slash commands first, otherwise forward to pi
+			async (text: string) => {
+				if (isPossibleCommand(text)) {
+					const result = await handleCommand(text, pi, true);
+					if (result.handled) return; // bridge or agent handled it
+					// Unknown command — fall through to forward as regular message
 				}
-				messageCount++;
-				pi.sendUserMessage(cleanedText);
+				pi.sendUserMessage(text);
 				await sendMsg(
-					`👂 Got it! Working on: _${cleanedText.slice(0, 100)}_`,
+					`👂 Got it! Working on: _${text.slice(0, 100)}_`,
 					undefined,
 					"Markdown",
 				);
@@ -395,14 +238,39 @@ export default function telegramBridge(pi: ExtensionAPI) {
 						}
 						// Text message
 						if (u.message.text) {
+							const text = u.message.text;
+							// Check for slash commands
+							if (isPossibleCommand(text)) {
+								const result = await handleCommand(text, pi, false);
+								if (result.handled) {
+									const label =
+										result.type === "bridge"
+											? "(handled by bridge)"
+											: "(injected to agent)";
+									return {
+										content: [
+											{
+												type: "text",
+												text: `🔧 Command processed: "${text}" ${label}`,
+											},
+										],
+										details: {
+											message: text,
+											command: true,
+											commandType: result.type,
+										},
+									};
+								}
+								// Unknown command — fall through to return as regular message
+							}
 							return {
 								content: [
 									{
 										type: "text",
-										text: `📩 New message: "${u.message.text}"`,
+										text: `📩 New message: "${text}"`,
 									},
 								],
-								details: { message: u.message.text },
+								details: { message: text },
 							};
 						}
 					}

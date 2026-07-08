@@ -57,11 +57,7 @@ export async function sendMsg(
 	} catch (e: unknown) {
 		// Retry without parse_mode if formatting caused a 400 parse error
 		const msg = e instanceof Error ? e.message : String(e);
-		if (
-			parseMode &&
-			msg.includes("400") &&
-			(msg.includes("parse") || msg.includes("entity"))
-		) {
+		if (parseMode && msg.includes("400") && (msg.includes("parse") || msg.includes("entity"))) {
 			delete body.parse_mode;
 			const r2 = (await telegramApi("sendMessage", body)) as {
 				ok: boolean;
@@ -70,8 +66,7 @@ export async function sendMsg(
 			return r2.result.message_id;
 		}
 		throw e;
-	}
-}
+	}}
 
 // ── Photo / File Support ────────────────────────────────────────────
 
@@ -82,11 +77,14 @@ export async function sendMsg(
 export async function getFileUrl(fileId: string): Promise<string | null> {
 	const token = getToken();
 	try {
-		const res = await fetch(`${BASE_URL}${token}/getFile`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ file_id: fileId }),
-		});
+		const res = await fetch(
+			`${BASE_URL}${token}/getFile`,
+			{
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ file_id: fileId }),
+			},
+		);
 		if (!res.ok) return null;
 		const data = (await res.json()) as {
 			ok: boolean;
@@ -104,10 +102,7 @@ export async function getFileUrl(fileId: string): Promise<string | null> {
  * Returns the file path on success, null on failure.
  * Creates parent directories automatically.
  */
-export async function downloadFile(
-	fileId: string,
-	destPath: string,
-): Promise<string | null> {
+export async function downloadFile(fileId: string, destPath: string): Promise<string | null> {
 	try {
 		const fileUrl = await getFileUrl(fileId);
 		if (!fileUrl) return null;
@@ -151,7 +146,7 @@ export async function sendPhoto(
 	const token = getToken();
 	const formData = new FormData();
 	formData.set("chat_id", getChatId());
-	const blob = new Blob([fileData]);
+	const blob = new Blob([fileData] as any);
 	formData.set("photo", blob, filename);
 	if (caption) {
 		formData.set("caption", caption);
@@ -167,11 +162,7 @@ export async function sendPhoto(
 	if (!res.ok) {
 		const errText = await res.text();
 		// Retry without caption if parse_mode caused a 400
-		if (
-			caption &&
-			res.status === 400 &&
-			(errText.includes("parse") || errText.includes("entity"))
-		) {
+		if (caption && res.status === 400 && (errText.includes("parse") || errText.includes("entity"))) {
 			return sendPhoto(photoPath);
 		}
 		throw new Error(`sendPhoto failed: ${res.status} ${errText}`);
@@ -317,7 +308,7 @@ export async function pollUpdates(
 	botId: number | null,
 	lastUpdateId: number,
 	signal: AbortSignal,
-	onMessage: (text: string, msgChatId: string) => void,
+	onMessage: (text: string) => void,
 	onPhoto: (photoId: string, caption?: string) => void,
 	onUpdateId: (id: number) => void,
 ): Promise<void> {
@@ -342,12 +333,7 @@ export async function pollUpdates(
 						chat: { id: number };
 						from?: { id: number; is_bot?: boolean };
 						text?: string;
-						photo?: Array<{
-							file_id: string;
-							file_unique_id: string;
-							width: number;
-							height: number;
-						}>;
+						photo?: Array<{ file_id: string; file_unique_id: string; width: number; height: number }>;
 						caption?: string;
 					};
 					callback_query?: unknown;
@@ -363,7 +349,10 @@ export async function pollUpdates(
 				// Skip callback queries (handled by telegram_ask)
 				if (u.callback_query) continue;
 				// Process messages from the configured chat, not from our bot
-				if (u.message && String(u.message.chat.id) === chatId) {
+				if (
+					u.message &&
+					String(u.message.chat.id) === chatId
+				) {
 					if (u.message.from?.is_bot || u.message.from?.id === botId) {
 						continue;
 					}
@@ -375,7 +364,7 @@ export async function pollUpdates(
 					}
 					// Text message
 					if (u.message.text) {
-						onMessage(u.message.text, String(u.message.chat.id));
+						onMessage(u.message.text);
 					}
 				}
 			}

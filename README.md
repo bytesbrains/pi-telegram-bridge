@@ -1,151 +1,43 @@
 # pi-telegram-bridge
 
-Telegram bot bridge for pi agents — send messages, ask questions, receive photos, and get a live project dashboard on "hi".
+Telegram bot bridge for pi agents — send messages, ask questions, and listen for human replies via Telegram.
 
 ## Install
 
 ```bash
-pi install npm:@bytesbrains/pi-telegram-bridge@1.1.6
+pi install npm:@bytesbrains/pi-telegram-bridge
 ```
 
-## Quick Setup
+## Configuration
 
-### 1. Create a bot with @BotFather
-
-Open Telegram and chat with [@BotFather](https://t.me/BotFather):
-
-```
-/newbot
-```
-
-Follow the prompts. You'll get a token like:
-
-```
-123456:ABC-DEF1234ghikl-zyx57W2v1u123ew11
-```
-
-### 2. Get your Chat ID
-
-Send ANY message to your new bot on Telegram, then visit this URL in your browser:
-
-```
-https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
-```
-
-Look for `"chat":{"id":123456789}` in the response. That's your chat ID.
-
-> **For group chats:** Add the bot to a group, send a message mentioning the bot, then check the same URL. Use the group chat ID.
-
-### 3. Set environment variables
+Set the following environment variables:
 
 ```bash
 export TELEGRAM_BOT_TOKEN="123456:ABC-DEF1234ghikl-zyx57W2v1u123ew11"
 export TELEGRAM_CHAT_ID="123456789"
 ```
 
-Add them to your shell profile (`~/.zshrc`, `~/.bashrc`) to persist across sessions.
-
-### 4. Verify
-
-Start pi and run `telegram_status()`. You should see:
-
-```
-Active. Bot: @your_bot_name (listener: 🟢 running)
-```
-
-## Environment Variables
-
-| Variable             | Required | Default                 | Description                                                     |
-| -------------------- | -------- | ----------------------- | --------------------------------------------------------------- |
-| `TELEGRAM_BOT_TOKEN` | ✅       | —                       | Bot token from @BotFather                                       |
-| `TELEGRAM_CHAT_ID`   | ✅       | —                       | Chat ID to send/receive messages                                |
-| `TELEGRAM_MENTION`   | ❌       | `@pi` (or bot username) | Only respond to messages containing this mention in group chats |
-
-### TELEGRAM_MENTION
-
-Controls which messages the agent responds to in **group chats**:
-
-```bash
-# Use a custom mention trigger
-export TELEGRAM_MENTION="@mybot"
-
-# Or let it auto-detect from the bot username
-export TELEGRAM_MENTION=""   # defaults to @bot_username
-```
-
-- **Private chat** (direct message to bot): All messages are treated as directed — no mention needed
-- **Group chat**: Only messages containing `@botname` are forwarded to the agent. Everything else is ignored.
-
-## Features
-
-### Status Dashboard
-
-Send `hi`, `/status`, or `status` to your bot on Telegram. It replies with a live project summary:
-
-```
-📊 pi-ext Status
-
-📋 Open Issues: 3
-   #1 telegram-bridge HTML parse crash
-   #5 status dashboard on hi message
-
-🔀 Open PRs: 2
-   ✅ #2 fix(telegram-bridge): escape HTML entities
-
-🔧 Last CI: ⏳ queued (5 recent runs)
-```
-
-### Photo Support
-
-**Send photos to the agent:** Send any photo to the bot — the agent downloads it and can use `read()` to view it. Add a caption for context:
-
-> 📸 Photo: `login page broken, 404 in console`
-
-**Send photos from the agent:** Use `telegram_send_photo()` to share screenshots or diagrams:
-
-```
-telegram_send_photo(photoPath="/tmp/screenshot.png", caption="Build output")
-```
-
-### @Mention Support
-
-In group chats, the bot only responds to messages that mention it. This lets humans talk freely without triggering the agent.
-
-| Chat type | Message                  | Bot responds?                            |
-| --------- | ------------------------ | ---------------------------------------- |
-| Private   | `hi`                     | ✅                                       |
-| Private   | `@pi what's the status?` | ✅ (mention stripped)                    |
-| Group     | `hi`                     | ❌                                       |
-| Group     | `@pi what's the status?` | ✅ (agent receives `what's the status?`) |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `TELEGRAM_BOT_TOKEN` | ✅ | Bot token from [@BotFather](https://t.me/BotFather) |
+| `TELEGRAM_CHAT_ID` | ✅ | Target chat ID (your personal chat or a group) |
 
 ## Tools
 
 ### telegram_listen
 
-Check for new inbound messages (text and photos) from the human.
+Check for new inbound messages from the human.
 
 ```
 telegram_listen()
 ```
 
-Returns photo paths and captions if a photo was received.
-
 ### telegram_send
 
-Send a one-way text message.
+Send a one-way message. Use for status updates and progress reports.
 
 ```
 telegram_send(message="Build completed successfully ✅")
-```
-
-### telegram_send_photo
-
-Send a photo — supports local file paths and remote URLs.
-
-```
-telegram_send_photo(photoPath="/tmp/screenshot.png")
-telegram_send_photo(photoPath="/tmp/screenshot.png", caption="Error in console")
-telegram_send_photo(photoPath="https://example.com/image.jpg")
 ```
 
 ### telegram_ask
@@ -195,7 +87,6 @@ telegram_override(
 | `timedOut` | `boolean` | Whether the request timed out |
 
 **Agent workflow:**
-
 1. Agent gets blocked by supervisor
 2. Calls `telegram_override(command, reason, context)`
 3. Checks `details.action`:
@@ -212,11 +103,33 @@ Check if the bridge is configured and running.
 telegram_status()
 ```
 
+## Background Listener
+
+The extension starts a background listener on session start that polls for incoming Telegram messages. Any non-bot text message in the configured chat is forwarded to the agent as a user message. The agent responds with a confirmation.
+
+The listener runs automatically — no manual setup needed.
+
+## How It Works
+
+1. **Session start**: The bridge restores the last processed update ID from session state and starts polling
+2. **Inbound messages**: Non-bot text messages in the configured chat are forwarded to the agent
+3. **Session end**: The listener stops cleanly on session shutdown
+4. **Update ID is persisted** across sessions to avoid processing duplicate messages
+
+## Get a Bot Token
+
+1. Open Telegram and chat with [@BotFather](https://t.me/BotFather)
+2. Send `/newbot` and follow the prompts
+3. Copy the token and set `TELEGRAM_BOT_TOKEN`
+4. Send a message to your bot, then visit:
+   `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
+5. Copy the `chat.id` from the response and set `TELEGRAM_CHAT_ID`
+
 ## Requirements
 
 - Node.js >= 18
-- A Telegram bot token (from @BotFather)
-- A chat ID
+- A Telegram bot token
+- A chat ID to send/receive messages
 
 ## License
 

@@ -12,7 +12,10 @@ const BAR = "━".repeat(20);
 
 /** Escape user text for safe embedding inside HTML tags. */
 function escapeHtml(s: string): string {
-	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+	return s
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;");
 }
 
 function bold(s: string) {
@@ -28,7 +31,7 @@ function strike(s: string) {
 	return `<s>${escapeHtml(s)}</s>`;
 }
 function labelValue(label: string, value: string) {
-	return `${bold(label + ":")} ${value}`;
+	return `${bold(label + ":")} ${escapeHtml(value)}`;
 }
 function link(url: string, text: string) {
 	return `<a href="${url}">${escapeHtml(text)}</a>`;
@@ -254,7 +257,7 @@ export function ciPipeline(p: CIPipeline): string {
 	msg += `${BAR}\n`;
 	msg += labelValue("Run", `#${p.runNumber}`) + "\n";
 	msg += labelValue("Branch", code(p.branch)) + "\n";
-	msg += labelValue("Trigger", escapeHtml(p.event)) + "\n";
+	msg += labelValue("Trigger", p.event) + "\n";
 	if (p.triggeredBy) msg += labelValue("By", code(p.triggeredBy)) + "\n";
 	msg += `${BAR}\n`;
 

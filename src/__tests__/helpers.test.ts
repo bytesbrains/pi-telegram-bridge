@@ -440,7 +440,7 @@ describe("pollUpdates", () => {
       controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
-    expect(onMessage).toHaveBeenCalledWith('Hello agent!', '987654321');
+    expect(onMessage).toHaveBeenCalledWith("Hello agent!");
     expect(onUpdateId).toHaveBeenCalledWith(100);
   }, 15000);
 
@@ -618,7 +618,7 @@ describe("pollUpdates", () => {
       controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
-    expect(onMessage).toHaveBeenCalledWith('recovered', '987654321');
+    expect(onMessage).toHaveBeenCalledWith("recovered");
   }, 20000);
 
   it("handles network errors with retry", async () => {
@@ -663,7 +663,7 @@ describe("pollUpdates", () => {
       controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
-    expect(onMessage).toHaveBeenCalledWith('eventually', '987654321');
+    expect(onMessage).toHaveBeenCalledWith("eventually");
   }, 25000);
 
   it("stops gracefully when aborted immediately", async () => {
@@ -734,7 +734,7 @@ describe("pollUpdates", () => {
       controller.signal, onMessage, vi.fn(), onUpdateId,
     );
 
-    expect(onMessage).toHaveBeenCalledWith('after not-ok', '987654321');
+    expect(onMessage).toHaveBeenCalledWith("after not-ok");
   }, 20000);
 
   it("ignores messages without text field", async () => {
